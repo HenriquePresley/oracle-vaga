@@ -1,0 +1,47 @@
+name: procurar vaga na Oracle
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # a cada ~10 min (o GitHub às vezes atrasa um pouco)
+  workflow_dispatch: {}
+
+concurrency:
+  group: vaga
+  cancel-in-progress: false
+
+permissions:
+  actions: write   # pra desligar o próprio agendamento quando a máquina for criada
+  contents: read
+
+jobs:
+  tentar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -q oci
+      - name: credenciais (vêm dos segredos do repositório)
+        env:
+          OCI_CONFIG: ${{ secrets.OCI_CONFIG }}
+          OCI_KEY: ${{ secrets.OCI_KEY }}
+          SSH_PUB: ${{ secrets.SSH_PUB }}
+        run: |
+          mkdir -p ~/.oci ~/.ssh
+          printf '%s\n' "$OCI_CONFIG" > ~/.oci/config
+          printf '%s\n' "$OCI_KEY" > ~/.oci/oci_api_key.pem
+          printf '%s\n' "$SSH_PUB" > ~/.ssh/oracle_bot.pub
+          chmod 600 ~/.oci/config ~/.oci/oci_api_key.pem
+      - name: tentar criar a máquina (3 min por rodada)
+        env:
+          MAX_MINUTOS: "3"
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          TG_ADMIN: ${{ secrets.TG_ADMIN }}
+        run: python -u criar_vm.py
+      - name: conseguiu? desliga o agendamento
+        if: hashFiles('ip_servidor.txt') != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow disable vaga.yml --repo "$GITHUB_REPOSITORY"
